@@ -5,8 +5,8 @@ set -xeuo pipefail
 export WORKING_DIR="${PWD}"
 
 # Model
-model_name_or_path="Qwen/Qwen2.5-7B-Instruct"
-model_name="Qwen2.5-7B-Instruct"
+model_name_or_path="meta-llama/Llama-3.2-3B-Instruct"
+model_name="Llama-3.2-3B-Instruct"
 
 # SAGE method
 method="sage" # or "sage-light" for faster but slightly worse performance
@@ -14,10 +14,10 @@ hint_accuracy_min_threshold=0.1  # Only work for sage-light: When the accuracy o
 hint_accuracy_max_threshold=0.35  # Only work for sage-light When the accuracy of a prompt from previous epoch is larger than this threshold (easy), the hint level decreases by 1.
 
 # Wandb setting
-project_name="SAGE"
-experiment_name="${method}_${model_name}"
-export WANDB_API_KEY=""
-export WANDB_ENTITY=""
+project_name="sage-rebuttal"
+experiment_name="${method}_${model_name}_scafgrpodata"
+export WANDB_API_KEY="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"
+export WANDB_ENTITY="baliao-uva"
 # export WANDB_MODE="offline"
 
 # Output
@@ -26,8 +26,9 @@ mkdir -p "${ckpts_dir}/logs"
 export WANDB_DIR=${ckpts_dir}/logs
 
 # Trainig setting
-NGPUS=8
-train_prompt_bsz=128
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+NGPUS=4
+train_prompt_bsz=256
 train_prompt_mini_bsz=64
 
 # Algorithm setting
@@ -41,7 +42,7 @@ clip_ratio_low=0.2
 clip_ratio_high=0.28
 
 # Training data
-train_path="./data/train.parquet"
+train_path="./data/train_scaf_grpo.parquet"
 test_path="./data/test.parquet"
 train_files="['$train_path']"
 test_files="['$test_path']"
@@ -52,7 +53,7 @@ python3 -m recipe.hint.main_hint \
     data.val_files=${test_files} \
     data.train_batch_size=${train_prompt_bsz} \
     data.max_prompt_length=2048 \
-    data.max_response_length=8192 \
+    data.max_response_length=2048 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.prompt_key="prompt" \
@@ -66,32 +67,32 @@ python3 -m recipe.hint.main_hint \
     actor_rollout_ref.actor.clip_ratio_low=${clip_ratio_low} \
     actor_rollout_ref.actor.clip_ratio_high=${clip_ratio_high} \
     actor_rollout_ref.actor.ppo_mini_batch_size=${train_prompt_mini_bsz} \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.9 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.n=$n \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=16 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     trainer.method=${method} \
     trainer.hint_accuracy_min_threshold=${hint_accuracy_min_threshold} \
     trainer.hint_accuracy_max_threshold=${hint_accuracy_max_threshold} \
     trainer.critic_warmup=0 \
-    trainer.logger=['console'] \
+    trainer.logger=['console','wandb'] \
     trainer.project_name=${project_name} \
     trainer.experiment_name=${experiment_name} \
     trainer.n_gpus_per_node=${NGPUS} \
     trainer.val_before_train=False \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
+    trainer.save_freq=10 \
     trainer.default_local_dir=${ckpts_dir} \
     trainer.test_freq=-1 \
-    trainer.total_training_steps=500 \
+    trainer.total_training_steps=200 \
     trainer.total_epochs=1000 \
     trainer.resume_mode="auto" 2>&1 | tee ${ckpts_dir}/logs/log
