@@ -83,7 +83,7 @@ python3 -m recipe.hint.main_hint \
     trainer.hint_accuracy_min_threshold=${hint_accuracy_min_threshold} \
     trainer.hint_accuracy_max_threshold=${hint_accuracy_max_threshold} \
     trainer.critic_warmup=0 \
-    trainer.logger=['console','wandb'] \
+    trainer.logger=['console'] \
     trainer.project_name=${project_name} \
     trainer.experiment_name=${experiment_name} \
     trainer.n_gpus_per_node=${NGPUS} \
