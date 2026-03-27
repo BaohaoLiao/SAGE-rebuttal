@@ -43,7 +43,7 @@ clip_ratio_low=0.2
 clip_ratio_high=0.28
 
 # Training data
-train_path="./data/train_scaf_grpo.parquet"
+train_path="./data/train.parquet"
 test_path="./data/test.parquet"
 train_files="['$train_path']"
 test_files="['$test_path']"
