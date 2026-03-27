@@ -11,6 +11,8 @@ defaults:
 trainer:
   # Hint strategy: "sage" (on-policy) or "sage-light" (original off-policy-style)
   method: sage
+  # Number of hint levels (2-5)
+  num_levels: 3
   # For sage-light, Threshold for switching hint levels based on per-prompt rollout accuracy.
   hint_accuracy_min_threshold: 0.0
   hint_accuracy_max_threshold: 0.35

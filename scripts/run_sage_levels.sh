@@ -5,18 +5,18 @@ set -xeuo pipefail
 export WORKING_DIR="${PWD}"
 
 # Model
-model_name_or_path="meta-llama/Llama-3.2-3B-Instruct"
-model_name="Llama-3.2-3B-Instruct"
+model_name_or_path="Qwen/Qwen2.5-7B-Instruct"
+model_name="Qwen2.5-7B-Instruct"
 
 # SAGE method
 method="sage" # or "sage-light" for faster but slightly worse performance
-num_levels=3  # Number of hint levels (2-5)
+num_levels=2  # Number of hint levels (2-5)
 hint_accuracy_min_threshold=0.1  # Only work for sage-light: When the accuracy of a prompt from previous epoch is lower than this threshold (hard), the hint level increases by 1.
 hint_accuracy_max_threshold=0.35  # Only work for sage-light When the accuracy of a prompt from previous epoch is larger than this threshold (easy), the hint level decreases by 1.
 
 # Wandb setting
 project_name="sage-rebuttal"
-experiment_name="${method}_${model_name}_scafgrpodata"
+experiment_name="${method}_${model_name}_${num_levels}levels"
 export WANDB_API_KEY="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"
 export WANDB_ENTITY="baliao-uva"
 # export WANDB_MODE="offline"
@@ -27,9 +27,9 @@ mkdir -p "${ckpts_dir}/logs"
 export WANDB_DIR=${ckpts_dir}/logs
 
 # Trainig setting
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 NGPUS=4
-train_prompt_bsz=256
+train_prompt_bsz=128
 train_prompt_mini_bsz=64
 
 # Algorithm setting
@@ -54,7 +54,7 @@ python3 -m recipe.hint.main_hint \
     data.val_files=${test_files} \
     data.train_batch_size=${train_prompt_bsz} \
     data.max_prompt_length=2048 \
-    data.max_response_length=2048 \
+    data.max_response_length=8192 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.prompt_key="prompt" \
@@ -92,7 +92,7 @@ python3 -m recipe.hint.main_hint \
     trainer.n_gpus_per_node=${NGPUS} \
     trainer.val_before_train=False \
     trainer.nnodes=1 \
-    trainer.save_freq=10 \
+    trainer.save_freq=50 \
     trainer.default_local_dir=${ckpts_dir} \
     trainer.test_freq=-1 \
     trainer.total_training_steps=200 \

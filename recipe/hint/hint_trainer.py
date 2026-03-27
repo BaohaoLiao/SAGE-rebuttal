@@ -55,7 +55,7 @@ from verl.utils.torch_functional import postprocess_data
 from verl.utils.model import compute_position_id_with_mask
 
 from recipe.hint.reward_tracker import RewardTracker
-from recipe.hint.prompt import ANSWER_SYSTEM_PROMPT, HINT_SYSTEM_PROMPT, HINT_USER_PROMPT_TEMPLATE
+from recipe.hint.prompt import ANSWER_SYSTEM_PROMPT, HINT_SYSTEM_PROMPTS, HINT_USER_PROMPT_TEMPLATE
 
 
 class RayHintTrainer(RayPPOTrainer):
@@ -124,9 +124,16 @@ class RayHintTrainer(RayPPOTrainer):
         if self.hint_method not in {"sage", "sage-light"}:
             raise ValueError(f"Unsupported trainer.method '{self.hint_method}'. Choose 'sage' or 'sage-light'.")
 
+        # Number of hint levels (2-5) for the sage method
+        self.num_levels = self.config.trainer.get("num_levels", 3)
+        if self.num_levels not in HINT_SYSTEM_PROMPTS:
+            raise ValueError(f"Unsupported num_levels={self.num_levels}. Choose from {list(HINT_SYSTEM_PROMPTS.keys())}.")
+        self.hint_system_prompt = HINT_SYSTEM_PROMPTS[self.num_levels]
+        self.level_keys = [f"level_{i}" for i in range(1, self.num_levels + 1)]
+
     def _build_hint_messages(self, question: str, solution: str) -> list[dict[str, str]]:
         return [
-            {"role": "system", "content": HINT_SYSTEM_PROMPT},
+            {"role": "system", "content": self.hint_system_prompt},
             {
                 "role": "user",
                 "content": HINT_USER_PROMPT_TEMPLATE.format(problem=question, solution=solution),
@@ -760,7 +767,7 @@ class RayHintTrainer(RayPPOTrainer):
                                         failed=True,
                                     )
 
-                            for level_key in ["level_1", "level_2", "level_3"]:
+                            for level_key in self.level_keys:
                                 target_indices = [
                                     idx
                                     for idx in range(len(base_batch))
@@ -821,7 +828,7 @@ class RayHintTrainer(RayPPOTrainer):
                             reward_extra_infos_dict = {}
 
                         metrics["hint/prompts_with_hint"] = len(hint_applied_prompts)
-                        level_counts = {"level_1": 0, "level_2": 0, "level_3": 0}
+                        level_counts = {k: 0 for k in self.level_keys}
                         for level in hint_final_level.values():
                             if level in level_counts:
                                 level_counts[level] += 1
@@ -834,7 +841,8 @@ class RayHintTrainer(RayPPOTrainer):
                             correct_mask = rewards_per_question > 0
                             accuracies = correct_mask.float().mean(dim=1).cpu().tolist()
 
-                            level_accumulators = {"no_hint": [], "level_1": [], "level_2": [], "level_3": []}
+                            level_accumulators = {"no_hint": []}
+                            level_accumulators.update({k: [] for k in self.level_keys})
                             for idx, acc in enumerate(accuracies):
                                 level = effective_level_by_batch_idx.get(idx, "no_hint")
                                 level_accumulators[level].append(acc)
@@ -858,7 +866,7 @@ class RayHintTrainer(RayPPOTrainer):
                     else:
                         # Original (off-policy style) hint logic ("sage-light")
                         current_level_by_batch_idx: dict[int, str] = {}
-                        level_to_indices = {"level_1": [], "level_2": [], "level_3": []}
+                        level_to_indices = {k: [] for k in self.level_keys}
                         for idx in range(len(base_batch)):
                             if index_array is not None:
                                 index_str = str(index_array[idx])
@@ -874,22 +882,18 @@ class RayHintTrainer(RayPPOTrainer):
                                 level = prev_level
                                 if prev_acc <= min_threshold:
                                     if prev_level == "no_hint":
-                                        level = "level_1"
-                                    elif prev_level == "level_1":
-                                        level = "level_2"
-                                    elif prev_level == "level_2":
-                                        level = "level_3"
-                                    elif prev_level == "level_3":
-                                        level = "level_3"
+                                        level = self.level_keys[0]
+                                    elif prev_level == self.level_keys[-1]:
+                                        level = self.level_keys[-1]
+                                    elif prev_level in self.level_keys:
+                                        level = self.level_keys[self.level_keys.index(prev_level) + 1]
                                     else:
                                         level = "no_hint"
                                 elif prev_acc > max_threshold:
-                                    if prev_level == "level_3":
-                                        level = "level_2"
-                                    elif prev_level == "level_2":
-                                        level = "level_1"
-                                    elif prev_level == "level_1":
+                                    if prev_level == self.level_keys[0]:
                                         level = "no_hint"
+                                    elif prev_level in self.level_keys:
+                                        level = self.level_keys[self.level_keys.index(prev_level) - 1]
                                     elif prev_level == "no_hint":
                                         level = "no_hint"
                                     else:
@@ -906,7 +910,7 @@ class RayHintTrainer(RayPPOTrainer):
                         generated_payloads: dict[int, dict[str, Any]] = {}
 
                         need_hint_indices = []
-                        for level_key in ["level_1", "level_2", "level_3"]:
+                        for level_key in self.level_keys:
                             need_hint_indices.extend(level_to_indices[level_key])
 
                         if need_hint_indices:
@@ -977,7 +981,7 @@ class RayHintTrainer(RayPPOTrainer):
                         hint_applied_prompts: set[int] = set()
                         effective_level_by_batch_idx = {idx: "no_hint" for idx in range(len(base_batch))}
 
-                        for level_key in ["level_1", "level_2", "level_3"]:
+                        for level_key in self.level_keys:
                             target_indices = level_to_indices[level_key]
                             if not target_indices:
                                 continue
@@ -1041,7 +1045,8 @@ class RayHintTrainer(RayPPOTrainer):
                             correct_mask = rewards_per_question > 0
                             accuracies = correct_mask.float().mean(dim=1).cpu().tolist()
 
-                            level_accumulators = {"no_hint": [], "level_1": [], "level_2": [], "level_3": []}
+                            level_accumulators = {"no_hint": []}
+                            level_accumulators.update({k: [] for k in self.level_keys})
                             for idx, acc in enumerate(accuracies):
                                 level = effective_level_by_batch_idx.get(idx, "no_hint")
                                 level_accumulators[level].append(acc)
