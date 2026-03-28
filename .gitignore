@@ -181,8 +181,7 @@ cython_debug/
 # Learn more at https://abstra.io/docs
 .abstra/
 
-# Data
-data/
+results/
 
 # Outputs
 outputs/

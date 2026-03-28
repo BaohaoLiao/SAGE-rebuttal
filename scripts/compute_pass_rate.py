@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument("--use_oat_grader", action="store_true", help="Use OAT grader instead of math_verify")
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
+    parser.add_argument("--max_num_seqs", type=int, default=256, help="Max number of sequences per batch")
     return parser.parse_args()
 
 
@@ -58,10 +59,11 @@ def main():
         model=args.model_name_or_path,
         tokenizer=args.model_name_or_path,
         dtype="bfloat16",
-        max_model_len=args.max_input_length,
+        max_model_len=args.max_input_length + args.max_new_tokens + 100,
         tensor_parallel_size=args.tensor_parallel_size,
         gpu_memory_utilization=args.gpu_memory_utilization,
         seed=args.seed,
+        max_num_seqs=args.max_num_seqs,
     )
 
     sampling_params = SamplingParams(
