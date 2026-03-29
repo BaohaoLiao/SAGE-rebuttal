@@ -1,31 +1,28 @@
 #!/bin/bash
 
 # CKPT directory
-method="sage"
-model_name="Qwen2.5-7B-Instruct"
-experiment_name="${method}_${model_name}"
-ckpts_dir="./outputs/${experiment_name}"
 data_path="baohao"
 
 # Configuration
-K=16  # Number of samples to generate per prompt, used for averaging for a stable metric
+K=8  # Number of samples to generate per prompt, used for averaging for a stable metric
 GPUS=(0 1 2 3 4 5 6 7)
 
 # Model and dataset arrays
-models=()
-for step in $(seq 50 50 500); do
-    models+=("${ckpts_dir}/global_step_${step}")
-done
-datasets=("aime24" "aime25" "amc23" "math500" "minerva_math" "olympiadbench" "gpqa" "mmlu_pro")
+models=("./outputs/sft_Llama-3.2-3B-Instruct/global_step_426")
+datasets=("aime24") # "aime25" "amc23" "math500" "minerva_math" "olympiadbench") # "gpqa" "mmlu_pro")
 
 # Loop through models and datasets
 for model_name in "${models[@]}"; do
-    # Convert model to huggingface format
-    echo "Converting model: $model_name to huggingface format..."
-    python -m verl.model_merger merge \
-        --backend fsdp \
-        --local_dir ${model_name}/actor \
-        --target_dir ${model_name}/merged
+    # Skip merge if merged/ already exists (e.g. SFT checkpoints)
+    if [ ! -d "${model_name}/merged" ]; then
+        echo "Converting model: $model_name to huggingface format..."
+        python -m verl.model_merger merge \
+            --backend fsdp \
+            --local_dir ${model_name}/actor \
+            --target_dir ${model_name}/merged
+    else
+        echo "Merged model already exists, skipping conversion."
+    fi
 
     echo "Testing model: $model_name"
     for dataset in "${datasets[@]}"; do

@@ -1,0 +1,105 @@
+#!/bin/bash
+
+set -xeuo pipefail
+
+export WORKING_DIR="${PWD}"
+
+# SFT checkpoint to use as init model
+sft_ckpt_dir="./outputs/sft_Llama-3.2-3B-Instruct/global_step_426"
+merged_model_dir="${sft_ckpt_dir}/merged"
+
+# Step 1: Merge FSDP sharded SFT checkpoint to HuggingFace format
+if [ ! -d "${merged_model_dir}" ] || [ -z "$(ls -A ${merged_model_dir}/*.safetensors 2>/dev/null)" ]; then
+    echo "Merging FSDP SFT checkpoint to HuggingFace format..."
+    python3 -m verl.model_merger merge \
+        --backend fsdp \
+        --local_dir ${sft_ckpt_dir} \
+        --target_dir ${merged_model_dir}
+else
+    echo "Merged model already exists at ${merged_model_dir}, skipping merge."
+fi
+
+# Model
+model_name_or_path="${merged_model_dir}"
+model_name="Llama-3.2-3B-Instruct"
+
+# Wandb setting
+project_name="sage-rebuttal"
+experiment_name="grpo_after_sft_${model_name}"
+export WANDB_API_KEY="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"
+export WANDB_ENTITY="baliao-uva"
+# export WANDB_MODE="offline"
+
+# Output
+ckpts_dir="/data/agenrrl/baohao/SAGE-rebuttal/outputs/${experiment_name}"
+mkdir -p "${ckpts_dir}/logs"
+export WANDB_DIR=${ckpts_dir}/logs
+
+# Training setting
+export CUDA_VISIBLE_DEVICES=4,5,6,7
+NGPUS=4
+train_prompt_bsz=128
+train_prompt_mini_bsz=64
+
+# Algorithm setting
+algorithm=grpo
+n=8
+kl_coef=0.000
+use_kl_in_reward=False
+use_kl_loss=False
+kl_loss_coef=0.0
+clip_ratio_low=0.2
+clip_ratio_high=0.28
+
+# Training data (RL split - easy problems with pass@1 > 0)
+train_path="./data/Llama-3.2-3B-Instruct_rl.parquet"
+test_path="./data/test.parquet"
+train_files="['$train_path']"
+test_files="['$test_path']"
+
+python3 -m verl.trainer.main_ppo \
+    algorithm.adv_estimator=${algorithm} \
+    data.train_files=${train_files} \
+    data.val_files=${test_files} \
+    data.train_batch_size=${train_prompt_bsz} \
+    data.max_prompt_length=2048 \
+    data.max_response_length=8192 \
+    data.filter_overlong_prompts=True \
+    data.truncation='error' \
+    data.prompt_key="prompt" \
+    algorithm.use_kl_in_reward=${use_kl_in_reward} \
+    algorithm.kl_ctrl.kl_coef=${kl_coef} \
+    actor_rollout_ref.model.path=${model_name_or_path} \
+    actor_rollout_ref.actor.optim.lr=1e-6 \
+    actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.actor.use_kl_loss=${use_kl_loss} \
+    actor_rollout_ref.actor.kl_loss_coef=${kl_loss_coef} \
+    actor_rollout_ref.actor.clip_ratio_low=${clip_ratio_low} \
+    actor_rollout_ref.actor.clip_ratio_high=${clip_ratio_high} \
+    actor_rollout_ref.actor.ppo_mini_batch_size=${train_prompt_mini_bsz} \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+    actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+    actor_rollout_ref.rollout.n=$n \
+    actor_rollout_ref.rollout.enable_chunked_prefill=False \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    trainer.critic_warmup=0 \
+    trainer.logger=['console','wandb'] \
+    trainer.project_name=${project_name} \
+    trainer.experiment_name=${experiment_name} \
+    trainer.n_gpus_per_node=${NGPUS} \
+    trainer.val_before_train=False \
+    trainer.nnodes=1 \
+    trainer.save_freq=50 \
+    trainer.default_local_dir=${ckpts_dir} \
+    trainer.test_freq=-1 \
+    trainer.total_training_steps=500 \
+    trainer.total_epochs=1000 \
+    trainer.resume_mode="auto" 2>&1 | tee ${ckpts_dir}/logs/log

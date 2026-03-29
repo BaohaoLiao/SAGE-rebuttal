@@ -10,9 +10,9 @@ from math_verify.errors import TimeoutException
 from math_verify.metric import math_metric
 from math_verify.parser import ExprExtractionConfig, LatexExtractionConfig
 
-from .qwen_evaluation.grader import math_equal
-from .qwen_evaluation.parser import extract_answer
-from .oat_math_grader import boxed_reward_fn as oat_evaluate
+from qwen_evaluation.grader import math_equal
+from qwen_evaluation.parser import extract_answer
+from oat_math_grader import boxed_reward_fn as oat_evaluate
 
 
 @dataclass
