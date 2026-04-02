@@ -131,12 +131,12 @@ class RayHintTrainer(RayPPOTrainer):
         self.hint_system_prompt = HINT_SYSTEM_PROMPTS[self.num_levels]
         self.level_keys = [f"level_{i}" for i in range(1, self.num_levels + 1)]
 
-    def _build_hint_messages(self, question: str, solution: str) -> list[dict[str, str]]:
+    def _build_hint_messages(self, question: str, answer: str) -> list[dict[str, str]]:
         return [
             {"role": "system", "content": self.hint_system_prompt},
             {
                 "role": "user",
-                "content": HINT_USER_PROMPT_TEMPLATE.format(problem=question, solution=solution),
+                "content": HINT_USER_PROMPT_TEMPLATE.format(problem=question, answer=answer),
             },
         ]
 
@@ -205,8 +205,8 @@ class RayHintTrainer(RayPPOTrainer):
     ) -> tuple[dict[int, dict[str, Any]], int, int, dict[int, str]]:
         """Generate full hint payloads (all levels) for multiple questions in one batch with retries."""
         prepared: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int]]] = {}
-        for idx, question, solution in requests:
-            prompt_inputs = self._prepare_prompt_inputs(self._build_hint_messages(question, solution))
+        for idx, question, answer in requests:
+            prompt_inputs = self._prepare_prompt_inputs(self._build_hint_messages(question, answer))
             if prompt_inputs is None:
                 continue
             prepared[idx] = prompt_inputs[:4]
@@ -280,7 +280,7 @@ class RayHintTrainer(RayPPOTrainer):
             {"role": "user", "content": user_content},
         ]
 
-    def _extract_question_and_solution(
+    def _extract_question_and_answer(
         self, base_batch: DataProto, gen_batch: DataProto, idx: int
     ) -> tuple[Optional[str], Optional[str]]:
         non_tensor_batch = base_batch.non_tensor_batch
@@ -293,23 +293,23 @@ class RayHintTrainer(RayPPOTrainer):
                     question = value.strip()
                     break
 
-        solution = None
-        if "solution" in non_tensor_batch:
-            value = non_tensor_batch["solution"][idx]
-            if isinstance(value, str) and value.strip():
-                solution = value.strip()
-        if solution is None and "answer" in non_tensor_batch:
+        answer = None
+        if "answer" in non_tensor_batch:
             value = non_tensor_batch["answer"][idx]
             if isinstance(value, str) and value.strip():
-                solution = value.strip()
-        if solution is None and "reward_model" in non_tensor_batch:
+                answer = value.strip()
+        if answer is None and "reward_model" in non_tensor_batch:
             reward_info = non_tensor_batch["reward_model"][idx]
             if isinstance(reward_info, dict):
-                for key in ("solution", "ground_truth", "answer"):
+                for key in ("answer", "ground_truth", "solution"):
                     value = reward_info.get(key)
                     if isinstance(value, str) and value.strip():
-                        solution = value.strip()
+                        answer = value.strip()
                         break
+        if answer is None and "solution" in non_tensor_batch:
+            value = non_tensor_batch["solution"][idx]
+            if isinstance(value, str) and value.strip():
+                answer = value.strip()
 
         if question is None and "raw_prompt_ids" in gen_batch.non_tensor_batch:
             try:
@@ -317,7 +317,7 @@ class RayHintTrainer(RayPPOTrainer):
             except Exception:
                 question = None
 
-        return question, solution
+        return question, answer
     
     def _apply_hints_to_gen_batch(
         self,
@@ -333,9 +333,9 @@ class RayHintTrainer(RayPPOTrainer):
         requests: list[tuple[int, str, str]] = []
         question_map: dict[int, str] = {}
         for idx in need_hint_indices:
-            question, solution = self._extract_question_and_solution(base_batch, gen_batch, idx)
-            if question and solution:
-                requests.append((idx, question, solution))
+            question, answer = self._extract_question_and_answer(base_batch, gen_batch, idx)
+            if question and answer:
+                requests.append((idx, question, answer))
                 question_map[idx] = question
 
         updated_gen_batch = deepcopy(gen_batch)
@@ -718,11 +718,11 @@ class RayHintTrainer(RayPPOTrainer):
                             requests = []
                             for idx in range(len(base_batch)):
                                 if not resolved_mask[idx]:
-                                    question, solution = self._extract_question_and_solution(
+                                    question, answer = self._extract_question_and_answer(
                                         base_batch, base_gen_batch, idx
                                     )
-                                    if question and solution:
-                                        requests.append((idx, question, solution))
+                                    if question and answer:
+                                        requests.append((idx, question, answer))
 
                             hint_payloads, hint_failed, hint_attempts, hint_payloads_raw = self._generate_hints_batch(
                                 requests
@@ -916,9 +916,9 @@ class RayHintTrainer(RayPPOTrainer):
                         if need_hint_indices:
                             requests = []
                             for idx in need_hint_indices:
-                                question, solution = self._extract_question_and_solution(base_batch, base_gen_batch, idx)
-                                if question and solution:
-                                    requests.append((idx, question, solution))
+                                question, answer = self._extract_question_and_answer(base_batch, base_gen_batch, idx)
+                                if question and answer:
+                                    requests.append((idx, question, answer))
 
                             if requests:
                                 generated_payloads, hint_failed, hint_attempts, hint_payloads_raw = self._generate_hints_batch(
