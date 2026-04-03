@@ -744,7 +744,7 @@ class RayHintTrainer(RayPPOTrainer):
                                     )
                             else:
                                 if "index" in base_batch.non_tensor_batch and hint_failed:
-                                    failed_payloads = {idx: {} for idx in requests}
+                                    failed_payloads = {idx: {} for idx, _, _ in requests}
                                     self.reward_tracker.log_hint_payloads(
                                         base_batch.non_tensor_batch["index"],
                                         failed_payloads,
@@ -754,7 +754,7 @@ class RayHintTrainer(RayPPOTrainer):
                                     )
                                     self.reward_tracker.log_hint_raw(
                                         base_batch.non_tensor_batch["index"],
-                                        {idx: hint_payloads_raw.get(idx, "") for idx in requests},
+                                        {idx: hint_payloads_raw.get(idx, "") for idx, _, _ in requests},
                                         self.global_steps,
                                         used=False,
                                         failed=True,

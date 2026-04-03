@@ -5,6 +5,7 @@ Reward tracking module for monitoring data point rewards across training steps.
 import json
 import os
 from collections import defaultdict
+from numbers import Integral
 from typing import Dict
 import torch
 
@@ -74,12 +75,24 @@ class RewardTracker:
             # Append to history
             self.index_to_reward_history[index_str].append((global_step, reward_float))
 
+    @staticmethod
+    def _normalize_batch_idx(batch_idx):
+        """Accept either an int batch index or a legacy `(idx, ...)` tuple."""
+        if isinstance(batch_idx, Integral):
+            return int(batch_idx)
+        if isinstance(batch_idx, (tuple, list)) and batch_idx and isinstance(batch_idx[0], Integral):
+            return int(batch_idx[0])
+        return None
+
     def log_hint_payloads(self, index_array, hint_payloads: dict, global_step: int, used: bool, failed: bool = False):
         """Log generated hints for given indices, regardless of success."""
         if index_array is None:
             return
         for batch_idx, payload in hint_payloads.items():
-            if batch_idx >= len(index_array):
+            batch_idx = self._normalize_batch_idx(batch_idx)
+            if batch_idx is None:
+                continue
+            if batch_idx < 0 or batch_idx >= len(index_array):
                 continue
             index_str = str(index_array[batch_idx])
             for level_key in ("level_1", "level_2", "level_3"):
@@ -100,7 +113,10 @@ class RewardTracker:
         if index_array is None:
             return
         for batch_idx, raw in raw_hints.items():
-            if batch_idx >= len(index_array):
+            batch_idx = self._normalize_batch_idx(batch_idx)
+            if batch_idx is None:
+                continue
+            if batch_idx < 0 or batch_idx >= len(index_array):
                 continue
             index_str = str(index_array[batch_idx])
             self.index_to_hint_raw_history[index_str].append(
@@ -117,7 +133,9 @@ class RewardTracker:
         if index_array is None:
             return
         for batch_idx, acc in enumerate(accuracies):
-            if batch_idx >= len(index_array):
+            if not isinstance(batch_idx, int):
+                continue
+            if batch_idx < 0 or batch_idx >= len(index_array):
                 continue
             index_str = str(index_array[batch_idx])
             level = levels_by_batch_idx.get(batch_idx, "no_hint")
